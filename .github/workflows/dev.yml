@@ -1,0 +1,55 @@
+name: deploy to development
+permissions:
+  id-token: write
+  contents: read
+on:
+  push:
+    branches: [develop]
+jobs:
+  deploy:
+    environment: 
+      name: development
+      url: https://dev.app.fief.gg
+
+    name: deploy to ECS
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2.3.4
+
+      - name: setup nodejs
+        uses: actions/setup-node@v2.1.3
+        with:
+          node-version: 16.4.0
+
+      - name: install deps
+        run: |
+          yarn
+          yarn build
+
+      - name: configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v1.6.1
+        with:
+          aws-region: us-west-2
+          role-to-assume: ${{ secrets.ASSUME_ROLE }}
+
+      - name: login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+  
+      - name: build, tag and push to Amazon ECR
+        env:
+          ECR_REPO: ${{ secrets.ECR_URL }}
+          SERVICE: dev-web-app
+          IMAGE_TAG: latest
+        run: |
+          docker build -t $ECR_REPO/$SERVICE:$IMAGE_TAG .
+          docker push $ECR_REPO/$SERVICE:$IMAGE_TAG
+
+      - name: deploy
+        env:
+          CLUSTER: ${{ secrets.ECS_CLUSTER }}
+          SERVICE: dev-web-app
+          AWS_REGION: us-west-2
+        run: |
+          aws ecs --region $AWS_REGION update-service --cluster $CLUSTER --service $SERVICE --force-new-deployment
